@@ -71,35 +71,41 @@ function formatScore(score) {
 }
 
 function viewFullDashboard() {
-  if (selectedItem.value.recordType === 'batch') {
-    sessionStorage.setItem('savedBatchData', JSON.stringify({
-      reportName: selectedItem.value.reportName,
-      sourceName: selectedItem.value.sourceName,
-      results: selectedItem.value.analyzedData
-    }))
-  } else if (selectedItem.value.recordType === 'single') {
-    const fakeBatchResult = [{
-      text: selectedItem.value.originalText,
-      overview: {
-        label: selectedItem.value.overallLabel,
-        type: selectedItem.value.overallLabel?.toLowerCase() || 'neutral',
-        posPct: selectedItem.value.scores?.positive || 0,
-        neuPct: selectedItem.value.scores?.neutral || 0,
-        negPct: selectedItem.value.scores?.negative || 0
-      },
-      keywords: selectedItem.value.keyTerms || [],
-      sentences: selectedItem.value.sentences || []
-    }]
+  const item = selectedItem.value
+  const recordType = item.recordType
 
+  if (recordType === 'batch') {
     sessionStorage.setItem('savedBatchData', JSON.stringify({
+      reportName: item.reportName,
+      sourceName: item.sourceName,
+      results: item.analyzedData
+    }))
+  } else if (recordType === 'single') {
+    sessionStorage.setItem('savedSingleData', JSON.stringify({
       reportName: 'Single Analysis Record',
-      sourceName: 'Manual Input',
-      results: fakeBatchResult
+      originalText: item.originalText,
+      overallLabel: item.overallLabel,
+      scores: item.scores,
+      keyTerms: item.keyTerms,
+      sentences: item.sentences
+    }))
+  } else if (recordType === 'url-analyzer') {
+    sessionStorage.setItem('savedUrlData', JSON.stringify({
+      reportName: item.reportName,
+      sourceName: item.sourceName,
+      results: item.analyzedData
     }))
   }
 
   closeDetail()
-  router.push('/analyze-batch')
+
+  if (recordType === 'single') {
+    router.push('/analyze')
+  } else if (recordType === 'url-analyzer') {
+    router.push('/url-analyze')
+  } else {
+    router.push('/analyze-batch')
+  }
 }
 
 onMounted(() => {
@@ -140,15 +146,18 @@ onMounted(() => {
           <div class="card-header">
             <span class="date">{{ formatDate(item.displayDate) }}</span>
             <span class="badge" :class="item.overallLabel?.toLowerCase()">
-              {{ item.recordType === 'batch' ? 'BATCH - ' : 'SINGLE - ' }}{{ item.overallLabel }}
+              {{ item.recordType === 'url-analyzer' ? 'URL - ' : item.recordType === 'batch' ? 'BATCH - ' : 'SINGLE - ' }}{{ item.overallLabel }}
             </span>
           </div>
 
           <div class="card-body">
             <p class="preview-text">
-              <strong>[{{ item.recordType === 'batch' ? item.reportName : 'Single Analysis' }}]</strong><br />
+              <strong>[{{ item.recordType === 'url-analyzer' ? item.reportName : item.recordType === 'batch' ? item.reportName : 'Single Analysis' }}]</strong><br />
               <span v-if="item.recordType === 'batch'">
-                [Batch Report] {{ item.reportName }} - Analysed sentences from {{ item.sourceName }}.
+                Analysed sentences from {{ item.sourceName && item.sourceName.length > 40 ? item.sourceName.substring(0, 40) + '...' : item.sourceName }}.
+              </span>
+              <span v-else-if="item.recordType === 'url-analyzer'">
+                Analysed sentences from URL source.
               </span>
               <span v-else>
                 {{ item.originalText.length > 80 ? item.originalText.substring(0, 80) + '...' : item.originalText }}
@@ -172,7 +181,7 @@ onMounted(() => {
     <div v-if="selectedItem" class="modal-overlay" @click.self="closeDetail">
       <div class="modal-content">
         <header class="modal-header">
-          <h3>{{ selectedItem.recordType === 'batch' ? 'Batch Report Overview' : 'Single Analysis Overview' }}</h3>
+          <h3>{{ selectedItem.recordType === 'url-analyzer' ? 'URL Analysis Overview' : selectedItem.recordType === 'batch' ? 'Batch Report Overview' : 'Single Analysis Overview' }}</h3>
           <button class="close-btn" @click="closeDetail">×</button>
         </header>
 
@@ -181,8 +190,8 @@ onMounted(() => {
           <div class="detail-section">
             <h4>Report Info</h4>
             <div class="info-box">
-              <p><strong>Report Name:</strong> {{ selectedItem.recordType === 'batch' ? selectedItem.reportName : 'Manual Text Analysis' }}</p>
-              <p><strong>Source File:</strong> {{ selectedItem.recordType === 'batch' ? selectedItem.sourceName : 'Direct Input' }}</p>
+              <p><strong>Report Name:</strong> {{ (selectedItem.recordType === 'batch' || selectedItem.recordType === 'url-analyzer') ? selectedItem.reportName : 'Manual Text Analysis' }}</p>
+              <p class="source-line"><strong>Source:</strong> {{ (selectedItem.recordType === 'batch' || selectedItem.recordType === 'url-analyzer') ? selectedItem.sourceName : 'Direct Input' }}</p>
             </div>
           </div>
 
@@ -288,7 +297,7 @@ onMounted(() => {
 .badge.negative { background: #fee2e2; color: #991b1b; }
 .badge.neutral { background: #f1f5f9; color: #475569; }
 
-.preview-text { color: #334155; line-height: 1.5; flex: 1; font-size: 0.95rem; }
+.preview-text { color: #334155; line-height: 1.5; flex: 1; font-size: 0.95rem; overflow: hidden; word-break: break-word; }
 
 .card-footer {
   display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f1f5f9; padding-top: 1rem; gap: 8px;
@@ -402,4 +411,14 @@ onMounted(() => {
 .score-item.positive { background: #dcfce7; color: #166534; }
 .score-item.neutral { background: #f1f5f9; color: #475569; }
 .score-item.negative { background: #fee2e2; color: #991b1b; }
+
+.source-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.info-box {
+  overflow: hidden;
+}
 </style>

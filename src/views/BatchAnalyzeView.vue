@@ -34,6 +34,9 @@ const isSaving = ref(false)
 const availablePlans = ref([])
 const selectedPlanId = ref('')
 const isAddingToPlan = ref(false)
+const isHistoryMode = ref(false)
+const historyReportName = ref('')
+const historySourceName = ref('')
 
 const handleDragOver = (e) => { e.preventDefault(); isDragging.value = true }
 const handleDragLeave = (e) => { e.preventDefault(); isDragging.value = false }
@@ -383,6 +386,9 @@ onMounted(() => {
   if (savedData) {
     try {
       const parsed = JSON.parse(savedData)
+      isHistoryMode.value = true
+      historyReportName.value = parsed.reportName || 'Historical Report'
+      historySourceName.value = parsed.sourceName || 'Unknown Source'
       if (Array.isArray(parsed.results) && parsed.results.length > 0) {
         batchResults.value = parsed.results
         selectedFile.value = { name: `${parsed.reportName} (${parsed.sourceName})` }
@@ -403,9 +409,14 @@ onMounted(() => {
     <div class="page-header">
       <h2>Sentiment Dashboard</h2>
       <div class="header-actions">
-        <button v-if="!batchResults" class="btn-back" @click="router.push('/dashboard')">Back to Home</button>
-        <button v-if="batchResults" class="btn-save" @click="openSaveModal">Save to DB</button>
-        <button v-if="batchResults" class="btn-new" @click="newBatch">+ New Analysis</button>
+        <template v-if="isHistoryMode">
+          <button class="btn-back-history" @click="router.push('/history')">← Back to History</button>
+        </template>
+        <template v-else>
+          <button v-if="!batchResults" class="btn-back" @click="router.push('/dashboard')">Back to Home</button>
+          <button v-if="batchResults" class="btn-save" @click="openSaveModal">Save to DB</button>
+          <button v-if="batchResults" class="btn-new" @click="newBatch">+ New Analysis</button>
+        </template>
       </div>
     </div>
 
@@ -463,8 +474,17 @@ onMounted(() => {
     </div>
 
     <div v-else class="dashboard-grid">
-      <div v-if="selectedFile && !csvData.length" class="history-banner">
-        <strong>Viewing Historical Data:</strong> {{ selectedFile.name }}
+      <div v-if="isHistoryMode" class="history-hero">
+        <div class="history-hero-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="history-hero-text">
+          <h3>{{ historyReportName }}</h3>
+          <p>{{ historySourceName }}</p>
+        </div>
       </div>
 
       <div class="row metric-cards">
@@ -654,6 +674,29 @@ onMounted(() => {
 .header-actions { display: flex; gap: 10px; }
 .btn-new { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600;}
 .btn-back { background: transparent; color: #64748b; border: 1px solid #cbd5e1; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+.btn-back-history {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; border: none; padding: 10px 22px; border-radius: 8px;
+  cursor: pointer; font-weight: 600; font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+  transition: all 0.2s ease;
+}
+.btn-back-history:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4); }
+
+.history-hero {
+  display: flex; align-items: center; gap: 16px;
+  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  border: 1px solid #c7d2fe; border-radius: 12px;
+  padding: 18px 24px; margin-bottom: 4px;
+}
+.history-hero-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.history-hero-text h3 { margin: 0 0 4px 0; font-size: 1.1rem; color: #1e293b; font-weight: 700; }
+.history-hero-text p { margin: 0; font-size: 0.88rem; color: #6366f1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px; }
 
 .upload-container {
   background: #ffffff; padding: 50px 40px; border-radius: 16px; text-align: center;

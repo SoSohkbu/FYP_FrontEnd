@@ -1,11 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title } from 'chart.js'
 import { Doughnut, Bar } from 'vue-chartjs'
 import VueWordCloud from 'vuewordcloud'
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title)
+
+const router = useRouter()
 
 const inputUrl = ref('')
 const isAnalyzing = ref(false)
@@ -19,6 +22,17 @@ const isSummarizing = ref(false)
 const aiSummaryData = ref(null)
 
 const alertMessage = ref('')
+
+const showSaveModal = ref(false)
+const modalStep = ref(1)
+const reportName = ref('')
+const isSaving = ref(false)
+const availablePlans = ref([])
+const selectedPlanId = ref('')
+const isAddingToPlan = ref(false)
+const isHistoryMode = ref(false)
+const historyReportName = ref('')
+const historySourceName = ref('')
 
 const isValidUrl = (urlString) => {
   try {
@@ -123,6 +137,111 @@ const newAnalysis = () => {
   alertMessage.value = ''
 }
 
+const openSaveModal = () => {
+  showSaveModal.value = true
+  modalStep.value = 1
+  reportName.value = ''
+}
+
+const saveToDatabase = async () => {
+  if (!reportName.value.trim()) {
+    alert('Please enter a report name.')
+    return
+  }
+
+  const storedUser = localStorage.getItem('user')
+  const userId = storedUser ? JSON.parse(storedUser)._id : null
+
+  if (!userId) {
+    alert('Please login first to save the report.')
+    return
+  }
+
+  isSaving.value = true
+  try {
+    const response = await fetch('http://localhost:3000/api/history/save-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId,
+        reportName: reportName.value,
+        sourceName: inputUrl.value || 'URL Analysis',
+        analyzedData: batchResults.value,
+        recordType: 'url-analyzer'
+      })
+    })
+
+    const data = await response.json()
+    if (data.success) {
+      modalStep.value = 2
+    } else {
+      throw new Error(data.message)
+    }
+  } catch (error) {
+    alert('Save failed: ' + error.message)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+const loadPlansForStep3 = async () => {
+  const storedUser = localStorage.getItem('user')
+  const userId = storedUser ? JSON.parse(storedUser)._id : null
+
+  if (!userId) return
+
+  try {
+    const res = await fetch(`http://localhost:3000/api/growth-plans?userId=${userId}`)
+    if (res.ok) {
+      availablePlans.value = await res.json()
+      if (availablePlans.value.length > 0) {
+        modalStep.value = 3
+      } else {
+        alert('You have no active Growth Plans. Please create one in the Growth Plan Dashboard first.')
+        showSaveModal.value = false
+      }
+    }
+  } catch (e) {
+    alert('Failed to load plans: ' + e.message)
+    showSaveModal.value = false
+  }
+}
+
+const confirmAddToPlan = async () => {
+  if (!selectedPlanId.value) return
+
+  isAddingToPlan.value = true
+
+  try {
+    const res = await fetch(`http://localhost:3000/api/growth-plans/${selectedPlanId.value}/data-points`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sourceType: 'url-analyzer',
+        sourceName: reportName.value || inputUrl.value || 'URL Analysis',
+        posPct: stats.value.posPct,
+        neuPct: 100 - stats.value.posPct - stats.value.negPct,
+        negPct: stats.value.negPct,
+        analyzedCount: stats.value.total,
+        originalData: batchResults.value
+      })
+    })
+
+    if (res.ok) {
+      alert('Successfully saved and added to your Growth Plan!')
+      showSaveModal.value = false
+      selectedPlanId.value = ''
+    } else {
+      const data = await res.json()
+      throw new Error(data.message || 'Failed to add to plan')
+    }
+  } catch (e) {
+    alert('Operation failed: ' + e.message)
+  } finally {
+    isAddingToPlan.value = false
+  }
+}
+
 const stats = computed(() => {
   if (!batchResults.value) return { total: 0, posCount: 0, negCount: 0, neuCount: 0, posPct: 0, negPct: 0 }
   const total = batchResults.value.length
@@ -202,6 +321,26 @@ const getWordColor = ([, weight]) => {
   if (filterType.value === 'positive') return weight > 5 ? '#27ae60' : '#2ecc71'
   return weight > 5 ? '#2c3e50' : '#34495e'
 }
+
+onMounted(() => {
+  const savedData = sessionStorage.getItem('savedUrlData')
+  if (savedData) {
+    try {
+      const parsed = JSON.parse(savedData)
+      isHistoryMode.value = true
+      historyReportName.value = parsed.reportName || 'Historical URL Analysis'
+      historySourceName.value = parsed.sourceName || 'Unknown URL'
+      if (Array.isArray(parsed.results) && parsed.results.length > 0) {
+        batchResults.value = parsed.results
+      } else {
+        batchResults.value = []
+      }
+      sessionStorage.removeItem('savedUrlData')
+    } catch (e) {
+      console.error('Failed to load historical URL data', e)
+    }
+  }
+})
 </script>
 
 <template>
@@ -210,7 +349,26 @@ const getWordColor = ([, weight]) => {
     <div class="page-header">
       <h2>Webpage Article Analysis</h2>
       <div class="header-actions">
-        <button v-if="batchResults" class="btn-new" @click="newAnalysis">＋ Analyze Another URL</button>
+        <template v-if="isHistoryMode">
+          <button class="btn-back-history" @click="router.push('/history')">← Back to History</button>
+        </template>
+        <template v-else>
+          <button v-if="batchResults" class="btn-save" @click="openSaveModal">Save to DB</button>
+          <button v-if="batchResults" class="btn-new" @click="newAnalysis">＋ Analyze Another URL</button>
+        </template>
+      </div>
+    </div>
+
+    <div v-if="isHistoryMode && batchResults" class="history-hero">
+      <div class="history-hero-icon">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+      </div>
+      <div class="history-hero-text">
+        <h3>{{ historyReportName }}</h3>
+        <p>{{ historySourceName }}</p>
       </div>
     </div>
 
@@ -337,6 +495,57 @@ const getWordColor = ([, weight]) => {
       </div>
 
     </div>
+
+    <div v-if="showSaveModal" class="modal-overlay" @click.self="showSaveModal = false">
+      <div class="modal-content">
+
+        <div v-if="modalStep === 1">
+          <h3>Save Analysis Report</h3>
+          <p>Please enter a name for this report to save it to the database:</p>
+          <input type="text" v-model="reportName" placeholder="e.g., Tech Article Review" @keyup.enter="saveToDatabase" class="modal-input" />
+          <div class="modal-actions">
+            <button @click="showSaveModal = false" class="btn-cancel">Cancel</button>
+            <button @click="saveToDatabase" class="btn-confirm" :disabled="!reportName || isSaving">
+              {{ isSaving ? 'Saving...' : 'Save Report' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-else-if="modalStep === 2" class="step-transition">
+          <div class="success-icon-wrapper">
+            <svg viewBox="0 0 24 24" width="48" height="48" stroke="#10b981" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          </div>
+          <h3 class="text-center">Report Saved!</h3>
+          <p class="text-center">Would you like to track these insights in your Growth Plan to monitor progress over time?</p>
+          <div class="modal-actions justify-center mt-4">
+            <button @click="showSaveModal = false" class="btn-cancel">No, Thanks</button>
+            <button @click="loadPlansForStep3" class="btn-plan-confirm">Yes, Add to Plan</button>
+          </div>
+        </div>
+
+        <div v-else-if="modalStep === 3" class="step-transition">
+          <h3>Select Growth Plan</h3>
+          <p>Choose an active plan to append this URL analysis data:</p>
+          <select v-model="selectedPlanId" class="modal-input mt-2">
+            <option value="" disabled>-- Select a Plan --</option>
+            <option v-for="plan in availablePlans" :key="plan._id" :value="plan._id">
+              {{ plan.name }}
+            </option>
+          </select>
+          <div class="modal-actions">
+            <button @click="showSaveModal = false" class="btn-cancel">Cancel</button>
+            <button @click="confirmAddToPlan" class="btn-plan-confirm" :disabled="!selectedPlanId || isAddingToPlan">
+              {{ isAddingToPlan ? 'Adding...' : 'Confirm Add' }}
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -417,4 +626,68 @@ const getWordColor = ([, weight]) => {
   .charts-row, .bottom-row { flex-direction: column; }
   .chart-large, .chart-small, .list-panel, .right-column-group { width: 100%; height: auto;}
 }
+
+.btn-save { background: #f59e0b; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; margin-right: 8px;}
+.btn-save:hover { background: #d97706; }
+
+.btn-back-history {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; border: none; padding: 10px 22px; border-radius: 8px;
+  cursor: pointer; font-weight: 600; font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+  transition: all 0.2s ease;
+}
+.btn-back-history:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4); }
+
+.history-hero {
+  display: flex; align-items: center; gap: 16px;
+  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  border: 1px solid #c7d2fe; border-radius: 12px;
+  padding: 18px 24px; margin-bottom: 20px;
+}
+.history-hero-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.history-hero-text h3 { margin: 0 0 4px 0; font-size: 1.1rem; color: #1e293b; font-weight: 700; }
+.history-hero-text p { margin: 0; font-size: 0.88rem; color: #6366f1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px; }
+
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000; padding: 1rem;
+}
+.modal-content {
+  background: white; width: 100%; max-width: 500px;
+  border-radius: 12px; padding: 30px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.2s ease-out;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.modal-content h3 { margin: 0 0 10px 0; color: #1e293b; font-size: 1.3rem; }
+.modal-content p { color: #64748b; margin-bottom: 15px; }
+.modal-input {
+  width: 100%; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px;
+  font-size: 1rem; margin-bottom: 20px; box-sizing: border-box; outline: none;
+}
+.modal-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.btn-cancel { background: #f1f5f9; color: #64748b; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.btn-confirm { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.btn-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-plan-confirm { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.btn-plan-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
+.success-icon-wrapper { text-align: center; margin-bottom: 15px; }
+.text-center { text-align: center; }
+.justify-center { justify-content: center; }
+.mt-2 { margin-top: 0.5rem; }
+.mt-4 { margin-top: 1rem; }
+.step-transition { animation: slideIn 0.3s ease-out; }
+select.modal-input { appearance: auto; }
 </style>

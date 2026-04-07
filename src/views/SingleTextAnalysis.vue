@@ -31,6 +31,8 @@ const availablePlans = ref([])
 const selectedPlanId = ref('')
 const isGeneratingAI = ref(false)
 const aiSummary = ref('')
+const isHistoryMode = ref(false)
+const historyReportName = ref('')
 
 const sentenceStats = computed(() => {
   const stats = { strNeg: 0, neg: 0, neu: 0, pos: 0, strPos: 0 }
@@ -250,7 +252,29 @@ async function executeAddToPlan() {
 onMounted(() => {
   const storedUser = localStorage.getItem('user')
   if (storedUser) currentUser.value = JSON.parse(storedUser)
-  if (route.query.q) {
+
+  const savedData = sessionStorage.getItem('savedSingleData')
+  if (savedData) {
+    try {
+      const parsed = JSON.parse(savedData)
+      isHistoryMode.value = true
+      historyReportName.value = parsed.reportName || 'Historical Analysis'
+      inputText.value = parsed.originalText || ''
+      overview.value = {
+        label: parsed.overallLabel || 'Neutral',
+        type: (parsed.overallLabel || 'neutral').toLowerCase(),
+        posPct: parsed.scores?.positive || 0,
+        negPct: parsed.scores?.negative || 0,
+        neuPct: parsed.scores?.neutral || 100
+      }
+      keywords.value = parsed.keyTerms || []
+      sentences.value = parsed.sentences || [{ text: parsed.originalText, type: overview.value.type }]
+      viewMode.value = 'result'
+      sessionStorage.removeItem('savedSingleData')
+    } catch (e) {
+      console.error('Failed to load historical single data', e)
+    }
+  } else if (route.query.q) {
     inputText.value = route.query.q
     analyzeText()
   }
@@ -305,12 +329,30 @@ onMounted(() => {
       <div class="page-header">
         <h2>Analysis Result</h2>
         <div class="header-actions">
-          <button class="btn-save-plan" @click="openSaveFlow" :disabled="analyzing">
-            Save DB
-          </button>
-          <button class="btn-new" @click="goToNewInput" :disabled="analyzing">
-            + New Analyze
-          </button>
+          <template v-if="isHistoryMode">
+            <button class="btn-back-history" @click="router.push('/history')">← Back to History</button>
+          </template>
+          <template v-else>
+            <button class="btn-save-plan" @click="openSaveFlow" :disabled="analyzing">
+              Save DB
+            </button>
+            <button class="btn-new" @click="goToNewInput" :disabled="analyzing">
+              + New Analyze
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="isHistoryMode" class="history-hero">
+        <div class="history-hero-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="history-hero-text">
+          <h3>{{ historyReportName }}</h3>
+          <p>Single Text Analysis Record</p>
         </div>
       </div>
 
@@ -501,6 +543,30 @@ onMounted(() => {
 
 .btn-cancel { background: #ffffff; color: #64748b; border: 1px solid #cbd5e1; }
 .btn-cancel:hover { background: #f8fafc; }
+
+.btn-back-history {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; border: none; padding: 12px 24px; border-radius: 8px;
+  cursor: pointer; font-weight: 600; font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+  transition: all 0.2s ease;
+}
+.btn-back-history:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4); }
+
+.history-hero {
+  display: flex; align-items: center; gap: 16px;
+  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  border: 1px solid #c7d2fe; border-radius: 12px;
+  padding: 18px 24px; margin-bottom: 20px;
+}
+.history-hero-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.history-hero-text h3 { margin: 0 0 4px 0; font-size: 1.1rem; color: #1e293b; font-weight: 700; }
+.history-hero-text p { margin: 0; font-size: 0.88rem; color: #6366f1; font-weight: 500; }
 
 .btn-sm { padding: 8px 16px; font-size: 0.85rem; border-radius: 6px; background: #8b5cf6; color: white; }
 .btn-sm:hover { background: #7c3aed; }
