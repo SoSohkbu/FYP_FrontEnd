@@ -43,6 +43,8 @@ sequenceDiagram
     participant SingleTextAnalysis
     participant BatchAnalyzeView
     participant UrlAnalyzer
+    participant CompareView
+    participant GrowthPlanView
     participant SessionStorage
     participant Backend
 
@@ -59,20 +61,20 @@ sequenceDiagram
 
     User->>HistoryView: Click "View Full Dashboard"
 
-    alt recordType === 'single'
-        HistoryView->>SessionStorage: setItem('savedSingleData', { originalText, overallLabel, scores, keyTerms, sentences })
-        HistoryView->>SingleTextAnalysis: router.push('/analyze')
-        SingleTextAnalysis->>SessionStorage: getItem('savedSingleData')
-        SessionStorage-->>SingleTextAnalysis: Return saved data
-        SingleTextAnalysis->>SessionStorage: removeItem('savedSingleData')
-        SingleTextAnalysis-->>User: Render result in History Mode (history hero banner + "← Back to History")
-    else recordType === 'batch'
+    alt recordType === 'batch'
         HistoryView->>SessionStorage: setItem('savedBatchData', { reportName, sourceName, results })
         HistoryView->>BatchAnalyzeView: router.push('/analyze-batch')
         BatchAnalyzeView->>SessionStorage: getItem('savedBatchData')
         SessionStorage-->>BatchAnalyzeView: Return saved data
         BatchAnalyzeView->>SessionStorage: removeItem('savedBatchData')
         BatchAnalyzeView-->>User: Render result in History Mode (history hero banner + "← Back to History")
+    else recordType === 'single'
+        HistoryView->>SessionStorage: setItem('savedSingleData', { originalText, overallLabel, scores, keyTerms, sentences })
+        HistoryView->>SingleTextAnalysis: router.push('/analyze')
+        SingleTextAnalysis->>SessionStorage: getItem('savedSingleData')
+        SessionStorage-->>SingleTextAnalysis: Return saved data
+        SingleTextAnalysis->>SessionStorage: removeItem('savedSingleData')
+        SingleTextAnalysis-->>User: Render result in History Mode (history hero banner + "← Back to History")
     else recordType === 'url-analyzer'
         HistoryView->>SessionStorage: setItem('savedUrlData', { reportName, sourceName, results })
         HistoryView->>UrlAnalyzer: router.push('/url-analyze')
@@ -95,8 +97,8 @@ sequenceDiagram
 
     opt Generate AI Summary
         User->>UrlAnalyzer: Click "AI Summary"
-        UrlAnalyzer->>Backend: POST /api/summarize  { reviews }
-        Backend-->>UrlAnalyzer: Return { success, summary }
+        UrlAnalyzer->>Backend: POST /api/deepseek/summary  { text, overview, keywords }
+        Backend-->>UrlAnalyzer: Return { status: 'success', summary }
         UrlAnalyzer-->>User: Show AI summary panel
     end
 
@@ -129,11 +131,18 @@ sequenceDiagram
     Backend-->>SingleTextAnalysis: Return { label, scores, keyTerms, sentences }
     SingleTextAnalysis-->>User: Display result view (donut chart, word cloud, sentences)
 
+    opt Generate AI Summary
+        User->>SingleTextAnalysis: Click "AI Summary"
+        SingleTextAnalysis->>Backend: POST /api/deepseek/summary  { text, overview, keywords, sentences }
+        Backend-->>SingleTextAnalysis: Return { status: 'success', summary }
+        SingleTextAnalysis-->>User: Show AI summary panel
+    end
+
     User->>SingleTextAnalysis: Click "Save DB"
     SingleTextAnalysis-->>User: Modal Step 1 – Enter record name
 
     User->>SingleTextAnalysis: Submit record name
-    SingleTextAnalysis->>Backend: POST /api/history/save-report  { userId, recordName, recordType: 'single', ... }
+    SingleTextAnalysis->>Backend: POST /api/history/save  { userId, name, inputText, overview, keywords, sentences }
     Backend-->>SingleTextAnalysis: { success: true }
     SingleTextAnalysis-->>User: Modal Step 2 – "Saved! Add to Growth Plan?"
 
@@ -160,10 +169,94 @@ sequenceDiagram
     end
     BatchAnalyzeView-->>User: Display full results, charts & word cloud
 
+    opt Generate AI Summary
+        User->>BatchAnalyzeView: Click "AI Summary"
+        BatchAnalyzeView->>Backend: POST /api/deepseek/summary  { text, overview, keywords }
+        Backend-->>BatchAnalyzeView: Return { status: 'success', summary }
+        BatchAnalyzeView-->>User: Show AI summary panel
+    end
+
     User->>BatchAnalyzeView: Click "Save to DB"
     BatchAnalyzeView-->>User: Modal – Enter report name
     User->>BatchAnalyzeView: Submit report name
     BatchAnalyzeView->>Backend: POST /api/history/save-report  { userId, reportName, sourceName, recordType: 'batch', analyzedData }
     Backend-->>BatchAnalyzeView: { success: true }
     BatchAnalyzeView-->>User: Option to add data point to Growth Plan
+
+    alt User adds to Growth Plan
+        BatchAnalyzeView->>Backend: GET /api/growth-plans?userId=...
+        Backend-->>BatchAnalyzeView: Return available plans
+        User->>BatchAnalyzeView: Select plan and confirm
+        BatchAnalyzeView->>Backend: POST /api/growth-plans/:planId/data-points  { sourceType, sourceName, posPct, neuPct, negPct, analyzedCount, originalData }
+        Backend-->>BatchAnalyzeView: 200 OK
+        BatchAnalyzeView-->>User: "Successfully added to Growth Plan!"
+    end
+
+    %% ─── Flow 5: Compare View ───
+    Note over User,Backend: Flow 5 – Compare View: Side-by-Side Sentiment Comparison
+
+    User->>CompareView: Open /compare
+    CompareView->>Backend: GET /api/history?userId=...
+    Backend-->>CompareView: Return history list (filtered to recordType === 'batch')
+    CompareView->>Backend: GET /api/growth-plans?userId=...
+    Backend-->>CompareView: Return growth plans list
+    CompareView-->>User: Display compare page with mode toggle (Individual Reports / Growth Plans)
+
+    User->>CompareView: Select compare mode (reports or plans)
+    User->>CompareView: Select Baseline (A) and Comparison (B) datasets
+    CompareView-->>User: Display side-by-side charts, word clouds & Net Score difference
+
+    opt Generate AI Comparative Insight
+        User->>CompareView: Click "Generate AI Insight"
+        CompareView->>Backend: POST /api/deepseek/summary  { text: comparisonPrompt, overview, keywords }
+        Backend-->>CompareView: Return { status: 'success', summary }
+        CompareView-->>User: Show AI comparative insight panel
+    end
+
+    %% ─── Flow 6: Growth Plan View ───
+    Note over User,Backend: Flow 6 – Growth Plan View: Manage Plans & Replay Data Points
+
+    User->>GrowthPlanView: Open /growth
+    GrowthPlanView->>Backend: GET /api/growth-plans?userId=...
+    Backend-->>GrowthPlanView: Return growth plans list
+    GrowthPlanView-->>User: Display plans with trend chart & data points
+
+    opt Create New Plan
+        User->>GrowthPlanView: Enter plan name & description, click "Create"
+        GrowthPlanView->>Backend: POST /api/growth-plans  { userId, name, description }
+        Backend-->>GrowthPlanView: Return new plan object
+        GrowthPlanView-->>User: New plan added to list
+    end
+
+    opt Delete Plan
+        User->>GrowthPlanView: Click "Delete Plan"
+        GrowthPlanView->>Backend: DELETE /api/growth-plans/:id
+        Backend-->>GrowthPlanView: 200 OK
+        GrowthPlanView-->>User: Plan removed from list
+    end
+
+    opt Remove Data Point from Plan
+        User->>GrowthPlanView: Click remove icon on a data point
+        GrowthPlanView->>Backend: DELETE /api/growth-plans/:planId/data-points/:pointId
+        Backend-->>GrowthPlanView: 200 OK
+        GrowthPlanView-->>User: Data point removed from plan
+    end
+
+    opt Replay Data Point (View Full Analysis)
+        User->>GrowthPlanView: Click "View" on a data point
+
+        alt sourceType === 'single'
+            GrowthPlanView->>SessionStorage: setItem('savedSingleData', { reportName, overallLabel, scores, keyTerms, sentences })
+            GrowthPlanView->>SingleTextAnalysis: router.push('/analyze')
+            SingleTextAnalysis-->>User: Render saved result in History Mode
+        else sourceType === 'url-analyzer'
+            GrowthPlanView->>SessionStorage: setItem('savedUrlData', { reportName, sourceName, results })
+            GrowthPlanView->>UrlAnalyzer: router.push('/url-analyze')
+            UrlAnalyzer-->>User: Render saved result in History Mode
+        else sourceType === 'batch'
+            GrowthPlanView->>SessionStorage: setItem('savedBatchData', { reportName, sourceName, results })
+            GrowthPlanView->>BatchAnalyzeView: router.push('/analyze-batch')
+            BatchAnalyzeView-->>User: Render saved result in History Mode
+        end
+    end
 ```
