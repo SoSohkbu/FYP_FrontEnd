@@ -209,21 +209,31 @@ const deletePlan = async () => {
 }
 
 const viewDataPoint = (pt) => {
-  let targetRoute = '/analyze-batch'
-
-  if (pt.sourceType === 'single') targetRoute = '/'
-  else if (pt.sourceType === 'url') targetRoute = '/url'
-  else if (pt.sourceType === 'batch') targetRoute = '/analyze-batch'
-
-  sessionStorage.setItem('savedBatchData', JSON.stringify({
-    reportName: pt.sourceName || 'Historical Record',
-    sourceName: pt.sourceType,
-    results: pt.originalData || []
-  }))
-
-  router.push(targetRoute).catch(err => {
-    console.error(err)
-  })
+  if (pt.sourceType === 'single') {
+    sessionStorage.setItem('savedSingleData', JSON.stringify({
+      reportName: pt.sourceName || 'Historical Record',
+      originalText: '',
+      overallLabel: pt.posPct >= 50 ? 'Positive' : pt.negPct >= 50 ? 'Negative' : 'Neutral',
+      scores: { positive: pt.posPct || 0, negative: pt.negPct || 0, neutral: pt.neuPct || 0 },
+      keyTerms: [],
+      sentences: pt.originalData || []
+    }))
+    router.push('/analyze').catch(err => console.error(err))
+  } else if (pt.sourceType === 'url-analyzer') {
+    sessionStorage.setItem('savedUrlData', JSON.stringify({
+      reportName: pt.sourceName || 'Historical Record',
+      sourceName: pt.sourceName || 'URL Analysis',
+      results: pt.originalData || []
+    }))
+    router.push('/url-analyze').catch(err => console.error(err))
+  } else {
+    sessionStorage.setItem('savedBatchData', JSON.stringify({
+      reportName: pt.sourceName || 'Historical Record',
+      sourceName: pt.sourceName || 'Batch Analysis',
+      results: pt.originalData || []
+    }))
+    router.push('/analyze-batch').catch(err => console.error(err))
+  }
 }
 
 const removeDataPoint = async (pointId) => {

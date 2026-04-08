@@ -8,7 +8,7 @@ const router = useRouter()
 
 function goToAnalyzeresult() {
   if (!input.value.trim()) return
-  router.push({ name: 'Analyzeresult', query: { q: input.value } })
+  router.push({ name: 'AnalyzeInput', query: { q: input.value } })
 }
 
 const scrollToSection = (id) => {
